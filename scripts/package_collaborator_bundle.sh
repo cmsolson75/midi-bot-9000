@@ -13,10 +13,15 @@ fi
 MIDI_BOT_BUNDLE="${1:-release/midi-bot-9000-collaborator}"
 MIDI_BOT_ARCHIVE="${MIDI_BOT_BUNDLE%/}.zip"
 MIDI_BOT_PRETRAIN="runs/mixed-pretrain-mps/best.pt"
+MIDI_BOT_SMOKE="runs/chord-mps-30m/best.pt"
 MIDI_BOT_BEST="runs/weimar-finetune-mps/best.pt"
 MIDI_BOT_LAST="runs/weimar-finetune-mps/last.pt"
 
-for checkpoint in "${MIDI_BOT_PRETRAIN}" "${MIDI_BOT_BEST}" "${MIDI_BOT_LAST}"; do
+for checkpoint in \
+  "${MIDI_BOT_PRETRAIN}" \
+  "${MIDI_BOT_SMOKE}" \
+  "${MIDI_BOT_BEST}" \
+  "${MIDI_BOT_LAST}"; do
   if [[ ! -f "${checkpoint}" ]]; then
     echo "Checkpoint does not exist: ${checkpoint}" >&2
     exit 2
@@ -34,6 +39,9 @@ mkdir -p "${MIDI_BOT_BUNDLE}/models"
 uv run --no-sync jazzbot export \
   --checkpoint "${MIDI_BOT_PRETRAIN}" \
   --output "${MIDI_BOT_BUNDLE}/models/pretrained-step5000"
+uv run --no-sync jazzbot export \
+  --checkpoint "${MIDI_BOT_SMOKE}" \
+  --output "${MIDI_BOT_BUNDLE}/models/smoke-original-step1400"
 uv run --no-sync jazzbot export \
   --checkpoint "${MIDI_BOT_BEST}" \
   --output "${MIDI_BOT_BUNDLE}/models/finetune-best-step900"

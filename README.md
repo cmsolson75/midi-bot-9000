@@ -133,8 +133,9 @@ we are limiting in PiJAMA.
 ## Share the trained model and generate takes
 
 To create one email-ready zip containing the step-5,000 pretrained model, the
-step-900 best conditioned model, the step-2,200 experimental last model, all
-tokenizers, the matching wheel, and a standalone usage guide, run:
+original step-1,400 chord-conditioned "smoke" model, the step-900 best conditioned
+model, the step-2,200 experimental last model, all tokenizers, the matching wheel,
+and a standalone usage guide, run:
 
 ```sh
 ./scripts/package_collaborator_bundle.sh

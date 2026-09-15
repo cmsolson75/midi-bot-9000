@@ -1,6 +1,6 @@
 # MIDI Bot 9000: Collaborator Usage Guide
 
-This bundle generates monophonic jazz MIDI. It contains three 7.6M-parameter
+This bundle generates monophonic jazz MIDI. It contains four 7.6M-parameter
 models, the matching tokenizers, and an installable Python wheel. It does not need
 the training repository or datasets.
 
@@ -21,6 +21,7 @@ This model is small enough for CPU inference.
 | Checkpoint | Use it for | Chord chart support |
 |---|---|---|
 | `models/pretrained-step5000/model.pt` | Freer, denser, surprising lines and MIDI continuation | No |
+| `models/smoke-original-step1400/model.pt` | Original 30-minute Weimar model used for the first chord-conditioned samples | Yes |
 | `models/finetune-best-step900/model.pt` | Best held-out result and the safest chord-aware default | Yes |
 | `models/finetune-last-step2200/model.pt` | More memorized experimental alternative; audition it rather than assuming it is worse | Yes |
 
@@ -30,6 +31,10 @@ step-2,000 weights were overwritten during training and are not in this bundle.
 
 Each model must remain beside its own `tokenizer.json`. Do not send or move a
 `model.pt` by itself.
+
+Despite its bundle label, `smoke-original-step1400` is the real 1,400-step
+Weimar-trained checkpoint that produced the original listening samples. It is not
+one of the disposable one-step pipeline smoke tests.
 
 ## Recommended first generation
 
@@ -70,6 +75,13 @@ uvx --from ./midi_bot_9000-0.1.0-py3-none-any.whl jazzbot generate \
   --seed 29 \
   --strip-tempo \
   --device auto
+```
+
+To reproduce the character of the original chord-conditioned samples, use the
+same command with:
+
+```sh
+--checkpoint ./models/smoke-original-step1400/model.pt
 ```
 
 ## Use the pretrained model
@@ -121,7 +133,7 @@ command repeatedly with a different `--seed`.
 
 ## Continue an existing MIDI phrase
 
-All three models can continue a MIDI prompt. For the pretrained model, omit the
+All four models can continue a MIDI prompt. For the pretrained model, omit the
 chord arguments. For a conditioned continuation:
 
 ```sh
@@ -213,4 +225,3 @@ DAW or trying several seeds is currently the fastest way to shape its groove.
   `0.90`, then try a new seed.
 - **Solo is too conservative:** try several seeds, then use the adventurous preset.
 - **DAW changes tempo:** confirm the generation command includes `--strip-tempo`.
-
