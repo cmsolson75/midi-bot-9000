@@ -1,0 +1,26 @@
+{
+  "model": {
+    "dim": 256,
+    "layers": 10,
+    "heads": 8,
+    "kv_heads": 4,
+    "hidden_dim": 704,
+    "context_length": 1024,
+    "dropout": 0.1
+  },
+  "batch_size": 4,
+  "accumulation_steps": 8,
+  "max_steps": 1400,
+  "learning_rate": 0.0003,
+  "min_lr_ratio": 0.1,
+  "warmup_steps": 100,
+  "weight_decay": 0.1,
+  "grad_clip": 1.0,
+  "eval_interval": 250,
+  "eval_batches": 16,
+  "log_interval": 25,
+  "transpose": 5,
+  "seed": 42,
+  "device": "mps",
+  "precision": "fp32"
+}

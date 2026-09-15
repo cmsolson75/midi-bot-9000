@@ -7,6 +7,7 @@ REMI bars are computational frames, not inferred musical measures.
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import mido
 import pretty_midi
 from miditok import REMI, TokenizerConfig
 from symusic import Note, Score, Tempo, TimeSignature, Track
@@ -26,13 +27,38 @@ class PreprocessConfig:
         return asdict(self)
 
 
-def make_tokenizer(resolution=24):
+CHORD_ROOTS = ("C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B")
+CHORD_QUALITIES = ("maj", "min", "dom7", "maj7", "min7", "hdim", "dim", "aug", "sus")
+
+
+def chord_token_names():
+    return ["Chord|NC"] + [
+        f"Chord|{root}:{quality}" for root in CHORD_ROOTS for quality in CHORD_QUALITIES
+    ]
+
+
+def add_no_chord_tokens(tokenizer, ids):
+    """Match the conditioned note grammar when harmony is unavailable."""
+    result = []
+    for token_id in ids:
+        result.append(token_id)
+        if tokenizer[token_id].startswith("Position_"):
+            result.append(tokenizer["Chord|NC_None"])
+    return result
+
+
+def make_tokenizer(resolution=24, use_chords=False):
+    special_tokens = ["PAD", "BOS", "EOS"]
+    if use_chords:
+        # MidiTok appends `_None` to special-token names. Building these into the
+        # tokenizer config keeps IDs stable after save/load.
+        special_tokens += chord_token_names()
     return REMI(
         TokenizerConfig(
             pitch_range=(21, 109),
             beat_res={(0, 16): resolution},
             num_velocities=32,
-            special_tokens=["PAD", "BOS", "EOS"],
+            special_tokens=special_tokens,
             use_chords=False,
             use_rests=False,
             use_tempos=False,
@@ -116,5 +142,24 @@ def encode(tokenizer, score):
 
 def decode(tokenizer, ids):
     special = {tokenizer["PAD_None"], tokenizer["BOS_None"], tokenizer["EOS_None"]}
-    clean = [int(i) for i in ids if i not in special]
+    clean = [int(i) for i in ids if i not in special and not tokenizer[int(i)].startswith("Chord|")]
     return monophonize(tokenizer.decode([clean]))
+
+
+def strip_tempo_events(path):
+    """Remove MIDI tempo metadata while preserving every event's tick position."""
+    path = Path(path)
+    midi = mido.MidiFile(path)
+    for track in midi.tracks:
+        pending_ticks = 0
+        kept = []
+        for message in track:
+            if message.type == "set_tempo":
+                pending_ticks += message.time
+                continue
+            kept.append(message.copy(time=message.time + pending_ticks))
+            pending_ticks = 0
+        track[:] = kept
+    temporary = path.with_name(f".{path.name}.no-tempo.tmp")
+    midi.save(temporary)
+    temporary.replace(path)

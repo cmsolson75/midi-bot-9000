@@ -62,6 +62,222 @@ Output includes the preprocessed prompt followed by generated notes. `--prompt-s
 
 Generation masks invalid note tuples, backward positions, and overlapping notes. The minimum note count applies to new notes; EOS can end the sample after that minimum. The token budget remains a hard maximum, so a short budget may produce fewer notes. The output JSON records sampled tokens and settings. KV caching keeps incremental generation cheap; when the context fills, generation re-prefills the latest half-context and resumes caching. This bounds cache memory but loses older musical context. MIDI playback requires a DAW or MIDI synthesizer.
 
+## Chord-conditioned Weimar experiment
+
+Prepare the official Weimar Jazz Database SQLite file into composition-grouped,
+beat-normalized splits. The representation inserts the active root/quality chord
+token before each monophonic note; pitch transposition moves notes and chord roots
+together.
+
+```sh
+uv run --no-sync jazzbot prepare-weimar --database data/weimar/wjazzd.db --output data/weimar-conditioned
+uv run --no-sync jazzbot train --data data/weimar-conditioned --config configs/chord-mps-30m.json --run runs/chord-mps
+```
+
+Supply comma-separated chord changes at generation time. `--beats-per-chord 4`
+holds each symbol for one four-quarter computational bar:
+
+```sh
+uv run --no-sync jazzbot generate --checkpoint runs/chord-mps/best.pt --output outputs/f-blues.mid --chords 'F7,Bb7,F7,F7,Bb7,Bb7,F7,D7,Gm7,C7,F7,C7' --beats-per-chord 4 --max-new-tokens 1024
+```
+
+Chord conditioning is implemented inside the causal token stream rather than with
+a separate encoder. Weimar timing is normalized to its annotated beats while
+retaining within-beat placement. Raw chord symbols are collapsed to 109 stable
+root/quality tokens. Slash bass and extensions beyond the quality class are not
+represented in this first experiment.
+
+### Multi-source pretraining then chord fine-tuning
+
+The Mac pipeline prepares PiJAMA and the public aligned Charlie Parker MIDI with
+the same 776-token vocabulary, inserting `Chord|NC` before every pretraining note.
+Source-balanced sampling defaults to 90% PiJAMA and 10% Parker, so corpus size does
+not silently determine the mixture. It then initializes a new Weimar run from the
+best mixed-pretraining weights while resetting the optimizer, learning-rate
+schedule, step, and validation history:
+
+```sh
+./scripts/train_multistage_mps.sh
+```
+
+Defaults are 5,000 mixed-pretraining updates followed by 1,000 Weimar updates. On
+the measured M4 Max throughput this is a multi-hour run. Both stages are resumable
+and completed stages are skipped. Override budgets or run directories without
+editing the script:
+
+```sh
+MIDI_PRETRAIN_STEPS=5000 MIDI_FINETUNE_STEPS=1000 ./scripts/train_multistage_mps.sh
+```
+
+The 1,000-step conditioned default reflects the completed experiment: validation
+loss was best at step 900 and degraded consistently during a longer run. The best
+checkpoint is retained independently from `last.pt`, but the shorter default avoids
+wasting compute on the observed overfit region.
+
+If a directory of DTL1000 MIDI files has been obtained separately, include it with
+a safer 35% PiJAMA / 55% DTL / 10% Parker mixture. Use fresh mixture and run paths
+when changing sources:
+
+```sh
+MIDI_DTL_MIDI_DIR=/path/to/dtl/midi MIDI_PRETRAIN_DATA=data/pretrain-pijama-dtl-parker MIDI_PRETRAIN_RUN=runs/pretrain-pijama-dtl-parker ./scripts/train_multistage_mps.sh
+```
+
+The final demo is written to
+`outputs/mixed-pretrain-then-weimar-conditioned-demo.mid`. Use new values for
+`MIDI_PRETRAIN_RUN` and `MIDI_FINETUNE_RUN` when starting an independent experiment.
+FiloSax is not downloaded automatically because its noncommercial research terms
+require individual approval. Jazz Trio Database is also excluded from the default:
+its automatically transcribed polyphonic piano would increase the same source bias
+we are limiting in PiJAMA.
+
+## Share the trained model and generate takes
+
+To create one email-ready zip containing the step-5,000 pretrained model, the
+step-900 best conditioned model, the step-2,200 experimental last model, all
+tokenizers, the matching wheel, and a standalone usage guide, run:
+
+```sh
+./scripts/package_collaborator_bundle.sh
+```
+
+Send `release/midi-bot-9000-collaborator.zip`. The extracted bundle's `README.md`
+contains setup, model selection, recommended presets, parameter explanations,
+MIDI continuation, chord limitations, tempo behavior, and troubleshooting. The
+source version is maintained in [USAGE_GUIDE.md](USAGE_GUIDE.md).
+
+To package only one checkpoint instead, use the following workflow.
+
+After the multistage run finishes, package the best conditioned checkpoint with
+its tokenizer and an installable project wheel:
+
+```sh
+./scripts/package_inference.sh \
+  runs/weimar-finetune-mps/best.pt \
+  release/midi-bot-9000-v1
+```
+
+On macOS the command also creates `release/midi-bot-9000-v1.zip`; send that zip,
+or send the **entire output directory**, but not `model.pt` by itself.
+It contains `model.pt`, its required adjacent `tokenizer.json`, and a `.whl` file
+with the matching inference code. The collaborator only needs Python 3.11-3.13
+and [uv](https://docs.astral.sh/uv/getting-started/installation/); they do not need
+this repository or any training data. From inside the shared directory, one clear
+generation command is:
+
+```sh
+uvx --from ./midi_bot_9000-0.1.0-py3-none-any.whl jazzbot generate \
+  --checkpoint ./model.pt \
+  --output ./solo.mid \
+  --chords 'Amaj7(13),F#maj/G#,F#min9,C#min9' \
+  --beats-per-chord 4 \
+  --max-new-tokens 1152 \
+  --min-notes 72 \
+  --temperature 0.94 \
+  --top-k 48 \
+  --top-p 0.97 \
+  --seed 29 \
+  --strip-tempo \
+  --device auto
+```
+
+For several takes, run the same command with several seeds and curate the
+strongest result:
+
+```sh
+for seed in 11 22 33 44 55 66 77 88; do
+  uvx --from ./midi_bot_9000-0.1.0-py3-none-any.whl jazzbot generate \
+    --checkpoint ./model.pt \
+    --output "./take-${seed}.mid" \
+    --chords 'Amaj7(13),F#maj/G#,F#min9,C#min9' \
+    --beats-per-chord 4 \
+    --max-new-tokens 2048 \
+    --min-notes 96 \
+    --temperature 0.95 \
+    --top-k 48 \
+    --top-p 0.97 \
+    --seed "${seed}" \
+    --strip-tempo \
+    --device auto
+done
+```
+
+The supplied progression repeats if generation lasts longer than one pass. Use
+`--temperature 0.78 --top-k 24 --top-p 0.90` for a more focused take,
+`0.92 / 40 / 0.96` for a balanced take, and `1.02 / 64 / 0.98` for a more
+adventurous take. Changing the seed usually gives more useful variation than
+raising temperature beyond about `1.1`.
+
+### Use the unconditioned pretraining model
+
+The mixed PiJAMA/Parker checkpoint can also be shared as its own instrument. It
+often produces freer, denser lines because it has not been narrowed toward the
+Weimar chord-conditioned distribution. Package it from the training checkout:
+
+```sh
+./scripts/package_inference.sh \
+  runs/mixed-pretrain-mps/best.pt \
+  release/midi-bot-9000-pretrained
+```
+
+From inside that shared directory, generate without `--chords`:
+
+```sh
+uvx --from ./midi_bot_9000-0.1.0-py3-none-any.whl jazzbot generate \
+  --checkpoint ./model.pt \
+  --output ./pretrained-solo.mid \
+  --max-new-tokens 1152 \
+  --min-notes 72 \
+  --temperature 0.92 \
+  --top-k 40 \
+  --top-p 0.96 \
+  --seed 29 \
+  --strip-tempo \
+  --device auto
+```
+
+This checkpoint used `Chord|NC` during pretraining and did not learn the actual
+chord tokens. Do not pass `--chords` to it: generate the solo freely, then place
+the result over chords in a DAW. It also supports unconditioned MIDI continuation
+with `--prompt phrase.mid --prompt-seconds 8`.
+
+A collaborator can also continue a monophonic MIDI phrase while retaining chord
+conditioning:
+
+```sh
+uvx --from ./midi_bot_9000-0.1.0-py3-none-any.whl jazzbot generate \
+  --checkpoint ./model.pt \
+  --prompt collaborator-lick.mid \
+  --prompt-seconds 8 \
+  --output ./continued-take.mid \
+  --chords 'Amaj7(13),F#maj/G#,F#min9,C#min9' \
+  --beats-per-chord 4 \
+  --max-new-tokens 1536 \
+  --min-notes 64 \
+  --temperature 0.92 \
+  --top-k 40 \
+  --top-p 0.96 \
+  --seed 33 \
+  --strip-tempo \
+  --device auto
+```
+
+The current CLI accepts a text chord chart with one shared duration, not a MIDI
+chord track. MIDI chord input can be added without changing the Transformer: a
+front end can group simultaneous chord-track notes, infer the nearest supported
+root/quality, retain each change time, and inject the same chord tokens already
+used by generation. Clean block-chord or guide tracks will be substantially more
+reliable than inferring harmony from a full piano performance. The present chord
+vocabulary collapses extensions and inversions into nine quality classes; retaining
+specific tensions or slash basses would require a richer vocabulary and another
+conditioned fine-tune.
+
+Generated MIDI normally contains the normalized 120 BPM tempo event used to map
+model ticks to seconds. Add `--strip-tempo` when importing into an existing DAW
+session: the exported file then contains notes and meter but no `set_tempo` event,
+so playback follows the project tempo instead of proposing 120 BPM. This changes
+wall-clock playback speed when the project is not 120 BPM; musical tick positions
+remain unchanged.
+
 ## Resume, evaluate, export
 
 ```sh
@@ -98,13 +314,13 @@ The default deterministic split groups albums approximately 80/10/10; identical 
 | Layers / width | 10 / 256 |
 | Query / KV heads | 8 / 4 |
 | SwiGLU hidden width | 704 |
-| Vocabulary | 667 MidiTok tokens |
+| Vocabulary | 667 unconditioned / 776 chord-conditioned tokens |
 | Context | 1,024 tokens |
 | FP32 weights | 28.8 MiB |
 | Position / normalization | RoPE / RMSNorm |
 | Output head | Tied to input embeddings |
 
-Attention uses PyTorch scaled-dot-product attention, selecting the available backend. Grouped KV heads reduce persistent cache size; explicit head expansion keeps the attention path portable. No inter-layer weight sharing, pretrained weights, chord conditioning, audio input, or polyphonic output is implemented.
+Attention uses PyTorch scaled-dot-product attention, selecting the available backend. Grouped KV heads reduce persistent cache size; explicit head expansion keeps the attention path portable. Chord conditioning uses tokens in the causal stream; there is no separate chord encoder. No inter-layer weight sharing, audio input, or polyphonic output is implemented.
 
 Start with a shorter run (for example `--max-steps 2000` in a new run directory), inspect validation loss and several fixed-prompt samples, then choose a longer budget. Compare against the extracted validation melodies, not the original full piano recordings. Loss alone does not establish musical quality: listen for phrase shape, repetition, swing feel, and playable intervals. `inspect` reports note density, pitch/velocity range, pitch-class entropy, and overlap counts, which are diagnostics rather than a musical-quality score.
 

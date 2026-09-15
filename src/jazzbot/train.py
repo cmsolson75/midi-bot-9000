@@ -11,7 +11,7 @@ from torch.nn import functional as F
 
 from .config import ModelConfig, TrainConfig
 from .data import TokenCorpus
-from .midi import load_tokenizer
+from .midi import CHORD_ROOTS, load_tokenizer
 from .model import JazzTransformer
 
 
@@ -110,7 +110,17 @@ def verify_tokenizer(checkpoint, path):
         raise ValueError("Tokenizer does not match checkpoint")
 
 
-def train(data, run, config, resume=None, device_override=None, max_steps=None):
+def train(
+    data,
+    run,
+    config,
+    resume=None,
+    device_override=None,
+    max_steps=None,
+    init_from=None,
+):
+    if resume and init_from:
+        raise ValueError("Use either --resume or --init-from, not both")
     cfg = TrainConfig.load(config)
     if device_override:
         cfg.device = device_override
@@ -151,6 +161,14 @@ def train(data, run, config, resume=None, device_override=None, max_steps=None):
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda" and precision == "fp16")
     generator = torch.Generator().manual_seed(cfg.seed)
     step, best = 0, float("inf")
+    initialized_from = None
+    if init_from:
+        state = torch.load(init_from, map_location="cpu", weights_only=True)
+        if state["model_config"] != cfg.to_dict()["model"]:
+            raise ValueError("Initialization checkpoint requires the same model configuration")
+        verify_tokenizer(state, data / "tokenizer.json")
+        model.load_state_dict(state["model"])
+        initialized_from = str(Path(init_from).resolve())
     if resume:
         state = torch.load(resume, map_location="cpu", weights_only=True)
         if (
@@ -170,6 +188,7 @@ def train(data, run, config, resume=None, device_override=None, max_steps=None):
         if device.type == "mps" and state.get("mps_rng") is not None:
             torch.mps.set_rng_state(state["mps_rng"])
         step, best = state["step"], state["best_val_loss"]
+        initialized_from = state.get("initialized_from")
     if step >= cfg.max_steps:
         raise ValueError(f"Checkpoint already at step {step}; increase max_steps to continue")
     shutil.copyfile(data / "tokenizer.json", run / "tokenizer.json")
@@ -180,6 +199,21 @@ def train(data, run, config, resume=None, device_override=None, max_steps=None):
             for token in (tokenizer[i] for i in range(len(tokenizer)))
         ]
     )
+    chord_ids = {}
+    for token_id in range(len(tokenizer)):
+        token = tokenizer[token_id]
+        if token.startswith("Chord|") and token != "Chord|NC_None":
+            root, quality = token.removeprefix("Chord|").removesuffix("_None").split(":", 1)
+            chord_ids[(root, quality)] = token_id
+    chord_remaps = None
+    if chord_ids:
+        chord_remaps = {}
+        for shift in range(-cfg.transpose, cfg.transpose + 1):
+            remap = torch.arange(len(tokenizer))
+            for (root, quality), token_id in chord_ids.items():
+                shifted_root = CHORD_ROOTS[(CHORD_ROOTS.index(root) + shift) % 12]
+                remap[token_id] = chord_ids[(shifted_root, quality)]
+            chord_remaps[shift] = remap
     print(
         f"{model.parameter_count():,} parameters | {device} | {precision} | "
         f"{cfg.batch_size * cfg.accumulation_steps * cfg.model.context_length:,} tokens/update"
@@ -193,7 +227,9 @@ def train(data, run, config, resume=None, device_override=None, max_steps=None):
         for group in optimizer.param_groups:
             group["lr"] = lr
         batches = [
-            train_data.random_batch(cfg.batch_size, generator, pitch_lookup, cfg.transpose)
+            train_data.random_batch(
+                cfg.batch_size, generator, pitch_lookup, cfg.transpose, chord_remaps
+            )
             for _ in range(cfg.accumulation_steps)
         ]
         valid_tokens = sum(int((y != -100).sum()) for _, y in batches)
@@ -246,6 +282,7 @@ def train(data, run, config, resume=None, device_override=None, max_steps=None):
                 "tokenizer_sha256": tokenizer_hash,
                 "manifest_sha256": manifest_hash,
                 "preprocessing": manifest["preprocessing"],
+                "initialized_from": initialized_from,
             }
             atomic_save(payload, run / "last.pt")
             if improved:

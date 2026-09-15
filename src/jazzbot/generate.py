@@ -4,8 +4,16 @@ from pathlib import Path
 
 import torch
 
-from .midi import PreprocessConfig, decode, encode, load_tokenizer, preprocess_midi
+from .midi import (
+    PreprocessConfig,
+    decode,
+    encode,
+    load_tokenizer,
+    preprocess_midi,
+    strip_tempo_events,
+)
 from .train import choose_device, load_checkpoint, verify_tokenizer
+from .weimar import normalize_chord
 
 
 class MonophonicGrammar:
@@ -17,7 +25,11 @@ class MonophonicGrammar:
         self.values = {}
         self.resolution = max(tokenizer.config.beat_res.values())
         for i in range(len(tokenizer)):
-            kind, value = tokenizer[i].split("_", 1)
+            raw = tokenizer[i]
+            if raw.startswith("Chord|"):
+                kind, value = "Chord", raw.removeprefix("Chord|").removesuffix("_None")
+            else:
+                kind, value = raw.split("_", 1)
             self.types.setdefault(kind, []).append(i)
             self.values[i] = value
         self.bar, self.position, self.end = -1, -1, 0
@@ -26,7 +38,11 @@ class MonophonicGrammar:
         self.min_pitch, self.max_pitch = min_pitch, max_pitch
 
     def consume(self, token):
-        kind, value = self.tokenizer[int(token)].split("_", 1)
+        raw = self.tokenizer[int(token)]
+        if raw.startswith("Chord|"):
+            kind, value = "Chord", raw.removeprefix("Chord|").removesuffix("_None")
+        else:
+            kind, value = raw.split("_", 1)
         if kind == "Bar":
             self.bar += 1
             self.position = -1
@@ -43,6 +59,8 @@ class MonophonicGrammar:
         if self.previous == "BOS":
             return self.types["Bar"]
         if self.previous == "Position":
+            if "Chord" in self.types:
+                return self.types["Chord"]
             return [
                 i
                 for i in self.types["Pitch"]
@@ -50,6 +68,12 @@ class MonophonicGrammar:
             ]
         if self.previous == "Pitch":
             return self.types["Velocity"]
+        if self.previous == "Chord":
+            return [
+                i
+                for i in self.types["Pitch"]
+                if self.min_pitch <= int(self.values[i]) <= self.max_pitch
+            ]
         if self.previous == "Velocity":
             return self.types["Duration"]
         if self.previous in {"Bar", "Duration"}:
@@ -96,17 +120,26 @@ def generate(
     seed=42,
     device="auto",
     min_notes=16,
+    chords=None,
+    beats_per_chord=4.0,
+    strip_tempo=False,
 ):
     if max_new_tokens < 4 or min_notes < 0:
         raise ValueError("max_new_tokens must be >= 4 and min_notes >= 0")
     if prompt_seconds is not None and prompt_seconds <= 0:
         raise ValueError("prompt_seconds must be positive")
+    if beats_per_chord <= 0:
+        raise ValueError("beats_per_chord must be positive")
     device = choose_device(device)
     model, state = load_checkpoint(checkpoint, device)
     model.eval()
     tokenizer_path = Path(checkpoint).parent / "tokenizer.json"
     verify_tokenizer(state, tokenizer_path)
     tokenizer = load_tokenizer(tokenizer_path)
+    chord_names = [normalize_chord(value) for value in chords.split(",")] if chords else []
+    if chord_names and not any(tokenizer[i].startswith("Chord|") for i in range(len(tokenizer))):
+        raise ValueError("Checkpoint tokenizer has no chord-conditioning tokens")
+    chord_ids = {name: tokenizer[f"Chord|{name}_None"] for name in chord_names}
     cfg = PreprocessConfig(**state["preprocessing"])
     ids = [tokenizer["BOS_None"]]
     if prompt:
@@ -127,7 +160,12 @@ def generate(
     started = time.perf_counter()
     for _ in range(max_new_tokens):
         logits, _, cache = model(current, cache=cache, use_cache=True, last_only=True)
-        token = sample(logits[0, -1], grammar.allowed(), temperature, top_k, top_p, random)
+        allowed = grammar.allowed()
+        if chord_names and grammar.previous == "Position":
+            beat = grammar.bar * 4 + grammar.position / grammar.resolution
+            chord_index = int(beat // beats_per_chord) % len(chord_names)
+            allowed = [chord_ids[chord_names[chord_index]]]
+        token = sample(logits[0, -1], allowed, temperature, top_k, top_p, random)
         ids.append(token)
         grammar.consume(token)
         if grammar.previous in {"Duration", "EOS"}:
@@ -147,6 +185,8 @@ def generate(
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     result.dump_midi(output)
+    if strip_tempo:
+        strip_tempo_events(output)
     report = {
         "checkpoint": str(checkpoint),
         "prompt": str(prompt) if prompt else None,
@@ -158,6 +198,9 @@ def generate(
         "temperature": temperature,
         "top_k": top_k,
         "top_p": top_p,
+        "chords": chord_names or None,
+        "beats_per_chord": beats_per_chord if chord_names else None,
+        "tempo_metadata": not strip_tempo,
         "seconds": time.perf_counter() - started,
         "device": str(device),
         "tokens": ids,

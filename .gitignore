@@ -25,6 +25,7 @@ outputs/
 # Packaging output
 build/
 dist/
+release/
 
 # Editor and OS files
 .idea/

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
-from .midi import PreprocessConfig, encode, make_tokenizer, preprocess_midi
+from .midi import PreprocessConfig, add_no_chord_tokens, encode, make_tokenizer, preprocess_midi
 
 
 def finite_number(value, default):
@@ -18,13 +18,15 @@ def finite_number(value, default):
         return default
 
 
-def prepare(root, output, split_mode="album", seed=42, limit=None, cfg=None):
+def prepare(
+    root, output, split_mode="album", seed=42, limit=None, cfg=None, chord_compatible=False
+):
     root, output = Path(root).resolve(), Path(output)
     cfg = cfg or PreprocessConfig()
     if output.exists() and any(output.iterdir()):
         raise ValueError(f"{output} is not empty; use a new output directory")
     output.mkdir(parents=True, exist_ok=True)
-    tokenizer = make_tokenizer(cfg.resolution)
+    tokenizer = make_tokenizer(cfg.resolution, use_chords=chord_compatible)
     tokenizer.save(output / "tokenizer.json")
     with (root / "pijama.csv").open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
@@ -97,7 +99,10 @@ def prepare(root, output, split_mode="album", seed=42, limit=None, cfg=None):
             note_count = len(score.tracks[0].notes)
             if note_count < cfg.min_notes:
                 raise ValueError(f"only {note_count} extracted notes")
-            ids = [tokenizer["BOS_None"], *encode(tokenizer, score), tokenizer["EOS_None"]]
+            encoded = encode(tokenizer, score)
+            if chord_compatible:
+                encoded = add_no_chord_tokens(tokenizer, encoded)
+            ids = [tokenizer["BOS_None"], *encoded, tokenizer["EOS_None"]]
             split = splits[i]
             records.append(
                 {
@@ -131,6 +136,11 @@ def prepare(root, output, split_mode="album", seed=42, limit=None, cfg=None):
         "tokenizer_sha256": hashlib.sha256((output / "tokenizer.json").read_bytes()).hexdigest(),
         "metadata_sha256": hashlib.sha256((root / "pijama.csv").read_bytes()).hexdigest(),
         "timing": "Fixed 120-QPM grid preserving seconds; bars are NOT verified beats",
+        "representation": (
+            "REMI with Chord|NC before each note for conditioned-model pretraining"
+            if chord_compatible
+            else "REMI"
+        ),
         "records": records,
         "skipped": skipped,
         "tokens": offsets,

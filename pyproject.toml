@@ -12,6 +12,7 @@ dependencies = [
   "miditok>=3.0.6,<4",
   "symusic>=0.5.5,<0.6",
   "pretty-midi>=0.2.10,<0.3",
+  "mido>=1.3,<2",
   "numpy>=1.26,<3",
   "tqdm>=4.66,<5",
 ]

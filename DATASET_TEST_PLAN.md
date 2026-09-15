@@ -30,11 +30,16 @@ If the target later becomes specifically a piano solo over a rhythm section, als
 |---|---|
 | PiJAMA download, extraction, REMI preparation, training, generation, evaluation | Implemented |
 | CUDA and MPS presets | Implemented; local validation used CPU |
-| Weimar, FiloSax, Parker, or DTL import | Not implemented |
+| Weimar beat/chord import | Implemented in `prepare-weimar` |
+| Generic harmony-agnostic MIDI import | Implemented in `prepare-midi-dir` |
+| Aligned Parker MIDI pretraining import | Implemented through the generic importer |
+| FiloSax chord import | Not implemented; access agreement required |
+| DTL-specific download/metadata import | Not implemented; supplied MIDI is accepted |
+| Source-balanced corpus mixing | Implemented in `mix` |
 | TSD tokenizer and matching generation grammar | Not implemented |
-| Fine-tuning on a different dataset | Not implemented; `--resume` requires the original dataset and model configuration |
+| Fine-tuning on a different dataset | Implemented with `--init-from` for compatible model/tokenizer configurations; `--resume` still requires the original dataset |
 | Common held-out evaluation across training corpora | Needs an explicit evaluation path; the current evaluator checks the training manifest |
-| Chord-conditioned generation | Not implemented |
+| Token-level chord-conditioned generation | Implemented for Weimar checkpoints |
 
 The existing PiJAMA commands below can run today. The other experiment rows describe work to implement before running them; there are no hypothetical CLI flags to copy.
 

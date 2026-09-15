@@ -16,7 +16,10 @@ class TokenCorpus:
             raise ValueError(f"No {split} recordings in {root}")
         self.tokens = np.memmap(self.root / f"{split}.bin", dtype=np.uint16, mode="r")
         self.context, self.pad = context_length, pad_id
-        self.weights = torch.tensor([r["length"] - 1 for r in self.records], dtype=torch.float64)
+        self.weights = torch.tensor(
+            [r.get("sampling_weight", r["length"] - 1) for r in self.records],
+            dtype=torch.float64,
+        )
         self.windows = [
             (i, start)
             for i, r in enumerate(self.records)
@@ -33,7 +36,9 @@ class TokenCorpus:
         x[: size - 1], y[: size - 1] = ids[:-1], ids[1:]
         return x, y
 
-    def random_batch(self, batch_size, generator, pitch_lookup=None, transpose=0):
+    def random_batch(
+        self, batch_size, generator, pitch_lookup=None, transpose=0, chord_remaps=None
+    ):
         choices = torch.multinomial(self.weights, batch_size, replacement=True, generator=generator)
         samples = []
         for index in choices.tolist():
@@ -57,6 +62,10 @@ class TokenCorpus:
                     x = remap[x]
                     valid = y >= 0
                     y[valid] = remap[y[valid]]
+                    if chord_remaps is not None:
+                        chord_remap = chord_remaps[shift]
+                        x = chord_remap[x]
+                        y[valid] = chord_remap[y[valid]]
             samples.append((x, y))
         return torch.stack([s[0] for s in samples]), torch.stack([s[1] for s in samples])
 

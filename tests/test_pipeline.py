@@ -11,6 +11,7 @@ from jazzbot.data import TokenCorpus
 from jazzbot.download import safe_extract
 from jazzbot.generate import generate
 from jazzbot.midi import PreprocessConfig, load_tokenizer
+from jazzbot.mix import mix_corpora
 from jazzbot.prepare import prepare
 from jazzbot.train import train
 
@@ -83,6 +84,12 @@ def test_train_resume_generate_and_window_boundaries(tmp_path):
     )
     assert len(score.tracks[0].notes) > 5
 
+    initialized_run = tmp_path / "initialized-run"
+    train(data, initialized_run, config, max_steps=1, init_from=run / "best.pt")
+    initialized = torch.load(initialized_run / "last.pt", weights_only=True)
+    assert initialized["step"] == 1
+    assert initialized["initialized_from"] == str((run / "best.pt").resolve())
+
 
 def test_duplicate_recordings_cannot_cross_official_splits(tmp_path):
     root = tmp_path / "raw"
@@ -98,3 +105,23 @@ def test_zip_path_traversal_rejected(tmp_path):
         handle.writestr("../outside.mid", b"bad")
     with pytest.raises(ValueError, match="Unsafe"):
         safe_extract(archive, tmp_path / "extracted")
+
+
+def test_source_balanced_mixture_weights(tmp_path):
+    root = tmp_path / "raw"
+    make_dataset(root)
+    first, second = tmp_path / "first", tmp_path / "second"
+    cfg = PreprocessConfig(min_notes=4)
+    prepare(root, first, split_mode="official", cfg=cfg, chord_compatible=True)
+    prepare(root, second, split_mode="official", cfg=cfg, chord_compatible=True)
+    target = tmp_path / "mixture"
+    mix_corpora([first, second], [0.8, 0.2], target)
+    manifest = json.loads((target / "manifest.json").read_text())
+    for split in ("train", "val", "test"):
+        totals = {}
+        for record in manifest["records"]:
+            if record["split"] == split:
+                totals[record["dataset"]] = (
+                    totals.get(record["dataset"], 0) + record["sampling_weight"]
+                )
+        assert totals == pytest.approx({"first": 0.8, "second": 0.2})
