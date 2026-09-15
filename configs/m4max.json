@@ -1,0 +1,7 @@
+{
+  "model": {"dim": 256, "layers": 10, "heads": 8, "kv_heads": 4, "hidden_dim": 704, "context_length": 1024, "dropout": 0.1},
+  "batch_size": 4,
+  "accumulation_steps": 8,
+  "device": "mps",
+  "precision": "fp32"
+}
