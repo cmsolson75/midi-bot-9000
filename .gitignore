@@ -55,3 +55,15 @@ midi-bot-9000-phrases/random_seed87_step4000.json
 midi-bot-9000-phrases/random_seed87_step4000.mid
 midi-bot-9000-phrases/README.md
 midi-bot-9000-phrases/SHA256SUMS.json
+best-seed33.json
+best-seed33.mid
+midi-bot-9000-pretrained-phrases.zip
+midi-bot-9000-pretrained-phrases/bundle.json
+midi-bot-9000-pretrained-phrases/generate.py
+midi-bot-9000-pretrained-phrases/midi_bot_9000-0.2.0-py3-none-any.whl
+midi-bot-9000-pretrained-phrases/models/best/model.pt
+midi-bot-9000-pretrained-phrases/models/best/tokenizer.json
+midi-bot-9000-pretrained-phrases/models/last/model.pt
+midi-bot-9000-pretrained-phrases/models/last/tokenizer.json
+midi-bot-9000-pretrained-phrases/README.md
+midi-bot-9000-pretrained-phrases/SHA256SUMS.json
