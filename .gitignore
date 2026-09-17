@@ -35,3 +35,23 @@ Thumbs.db
 
 # Logs
 *.log
+midi-bot-9000-phrases.zip
+midi-bot-9000-phrases/bundle.json
+midi-bot-9000-phrases/generate.py
+midi-bot-9000-phrases/midi_bot_9000-0.2.0-py3-none-any.whl
+midi-bot-9000-phrases/models/best/model.pt
+midi-bot-9000-phrases/models/best/tokenizer.json
+midi-bot-9000-phrases/models/last/model.pt
+midi-bot-9000-phrases/models/last/tokenizer.json
+midi-bot-9000-phrases/random_seed10_step4000.json
+midi-bot-9000-phrases/random_seed10_step4000.mid
+midi-bot-9000-phrases/random_seed33_step4000.json
+midi-bot-9000-phrases/random_seed33_step4000.mid
+midi-bot-9000-phrases/random_seed36_step4000.json
+midi-bot-9000-phrases/random_seed36_step4000.mid
+midi-bot-9000-phrases/random_seed45_step4000.json
+midi-bot-9000-phrases/random_seed45_step4000.mid
+midi-bot-9000-phrases/random_seed87_step4000.json
+midi-bot-9000-phrases/random_seed87_step4000.mid
+midi-bot-9000-phrases/README.md
+midi-bot-9000-phrases/SHA256SUMS.json
