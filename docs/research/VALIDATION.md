@@ -1,3 +1,7 @@
+> Historical experiment notes, retained for context. Local results and paths below
+> describe earlier runs; datasets and checkpoints are not included in this repository.
+> See the [README training instructions](../../README.md#training-and-evaluation) for current commands.
+
 # Local validation
 
 Validated on Windows / Python 3.12 / PyTorch 2.14.0 / MidiTok 3.0.6.post1, using CPU.

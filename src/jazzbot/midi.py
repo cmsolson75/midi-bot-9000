@@ -47,12 +47,14 @@ def add_no_chord_tokens(tokenizer, ids):
     return result
 
 
-def make_tokenizer(resolution=24, use_chords=False):
+def make_tokenizer(resolution=24, use_chords=False, use_phrases=False):
     special_tokens = ["PAD", "BOS", "EOS"]
     if use_chords:
         # MidiTok appends `_None` to special-token names. Building these into the
         # tokenizer config keeps IDs stable after save/load.
         special_tokens += chord_token_names()
+    if use_phrases:
+        special_tokens.append("PhraseStart")
     return REMI(
         TokenizerConfig(
             pitch_range=(21, 109),
@@ -142,7 +144,11 @@ def encode(tokenizer, score):
 
 def decode(tokenizer, ids):
     special = {tokenizer["PAD_None"], tokenizer["BOS_None"], tokenizer["EOS_None"]}
-    clean = [int(i) for i in ids if i not in special and not tokenizer[int(i)].startswith("Chord|")]
+    clean = [
+        int(i)
+        for i in ids
+        if i not in special and not tokenizer[int(i)].startswith(("Chord|", "PhraseStart_"))
+    ]
     return monophonize(tokenizer.decode([clean]))
 
 

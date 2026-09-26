@@ -1,10 +1,18 @@
 import argparse
 import json
-import shutil
+import sys
 from pathlib import Path
 
 
 def main():
+    try:
+        _main()
+    except (FileNotFoundError, FileExistsError, ValueError) as error:
+        print(f"jazzbot: {error}", file=sys.stderr)
+        raise SystemExit(2) from None
+
+
+def _main():
     parser = argparse.ArgumentParser(
         description="MIDI Bot 9000: train and sample tiny jazz Transformers"
     )
@@ -34,6 +42,11 @@ def main():
     prepare_weimar.add_argument("--output", default="data/weimar-conditioned")
     prepare_weimar.add_argument("--seed", type=int, default=42)
     prepare_weimar.add_argument("--limit", type=int)
+    prepare_weimar.add_argument(
+        "--phrase-boundaries",
+        action="store_true",
+        help="Add annotated PhraseStart tokens for a fresh phrase-aware model",
+    )
     prepare_directory = commands.add_parser(
         "prepare-midi-dir", help="Prepare a directory of MIDI files with Chord|NC tokens"
     )
@@ -82,9 +95,9 @@ def main():
     evaluate.add_argument("--batch-size", type=int, default=4)
     evaluate.add_argument("--max-batches", type=int)
     evaluate.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda", "mps"])
-    export = commands.add_parser("export", help="Save an inference-only PyTorch bundle")
+    export = commands.add_parser("export", help="Save a self-contained inference checkpoint")
     export.add_argument("--checkpoint", required=True)
-    export.add_argument("--output", default="outputs/jazzbot")
+    export.add_argument("--output", default="checkpoints/model.pt")
     info = commands.add_parser("info", help="Model size and available hardware")
     info.add_argument("--config", default="configs/m4max.json")
     info.add_argument("--chord-compatible", action="store_true")
@@ -135,7 +148,13 @@ def main():
 
         if args.limit is not None and args.limit < 1:
             parser.error("--limit must be positive")
-        prepare_weimar(args.database, args.output, args.seed, args.limit)
+        prepare_weimar(
+            args.database,
+            args.output,
+            args.seed,
+            args.limit,
+            phrase_boundaries=args.phrase_boundaries,
+        )
     elif args.command == "prepare-midi-dir":
         from .folder import prepare_midi_directory
 
@@ -185,26 +204,9 @@ def main():
             json.dumps(evaluate(model, corpus, device, args.batch_size, args.max_batches), indent=2)
         )
     elif args.command == "export":
-        import torch
+        from .checkpoint import export_checkpoint
 
-        from .train import atomic_save, verify_tokenizer
-
-        state = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-        source = Path(args.checkpoint).parent / "tokenizer.json"
-        verify_tokenizer(state, source)
-        target = Path(args.output)
-        target.mkdir(parents=True, exist_ok=True)
-        keys = (
-            "model",
-            "model_config",
-            "tokenizer_sha256",
-            "preprocessing",
-            "manifest_sha256",
-            "step",
-        )
-        atomic_save({key: state[key] for key in keys}, target / "model.pt")
-        shutil.copyfile(source, target / "tokenizer.json")
-        print(f"Inference bundle: {target.resolve()}")
+        export_checkpoint(args.checkpoint, args.output)
     elif args.command == "info":
         import torch
 

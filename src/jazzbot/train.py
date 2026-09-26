@@ -9,6 +9,8 @@ from pathlib import Path
 import torch
 from torch.nn import functional as F
 
+from .augment import NoteAugmenter
+from .checkpoint import verify_tokenizer_bytes
 from .config import ModelConfig, TrainConfig
 from .data import TokenCorpus
 from .midi import CHORD_ROOTS, load_tokenizer
@@ -105,9 +107,7 @@ def load_checkpoint(path, device="cpu"):
 
 
 def verify_tokenizer(checkpoint, path):
-    actual = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    if actual != checkpoint["tokenizer_sha256"]:
-        raise ValueError("Tokenizer does not match checkpoint")
+    verify_tokenizer_bytes(checkpoint, Path(path).read_bytes())
 
 
 def train(
@@ -139,7 +139,8 @@ def train(
     manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
     manifest = json.loads(manifest_bytes)
     tokenizer = load_tokenizer(data / "tokenizer.json")
-    tokenizer_hash = hashlib.sha256((data / "tokenizer.json").read_bytes()).hexdigest()
+    tokenizer_content = (data / "tokenizer.json").read_bytes()
+    tokenizer_hash = hashlib.sha256(tokenizer_content).hexdigest()
     if tokenizer_hash != manifest["tokenizer_sha256"]:
         raise ValueError("Prepared tokenizer differs from manifest")
     cfg.model.vocab_size = len(tokenizer)
@@ -160,7 +161,7 @@ def train(
     )
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda" and precision == "fp16")
     generator = torch.Generator().manual_seed(cfg.seed)
-    step, best = 0, float("inf")
+    step, best, best_step = 0, float("inf"), 0
     initialized_from = None
     if init_from:
         state = torch.load(init_from, map_location="cpu", weights_only=True)
@@ -188,6 +189,7 @@ def train(
         if device.type == "mps" and state.get("mps_rng") is not None:
             torch.mps.set_rng_state(state["mps_rng"])
         step, best = state["step"], state["best_val_loss"]
+        best_step = state.get("best_val_step")
         initialized_from = state.get("initialized_from")
     if step >= cfg.max_steps:
         raise ValueError(f"Checkpoint already at step {step}; increase max_steps to continue")
@@ -199,6 +201,14 @@ def train(
             for token in (tokenizer[i] for i in range(len(tokenizer)))
         ]
     )
+    augmenter = None
+    if cfg.augmentation_probability:
+        augmenter = NoteAugmenter(
+            tokenizer,
+            cfg.augmentation_probability,
+            cfg.velocity_shift_bins,
+            (cfg.duration_scale_min, cfg.duration_scale_max),
+        )
     chord_ids = {}
     for token_id in range(len(tokenizer)):
         token = tokenizer[token_id]
@@ -228,7 +238,12 @@ def train(
             group["lr"] = lr
         batches = [
             train_data.random_batch(
-                cfg.batch_size, generator, pitch_lookup, cfg.transpose, chord_remaps
+                cfg.batch_size,
+                generator,
+                pitch_lookup,
+                cfg.transpose,
+                chord_remaps,
+                augmenter=augmenter,
             )
             for _ in range(cfg.accumulation_steps)
         ]
@@ -266,7 +281,20 @@ def train(
             result = evaluate(model, val_data, device, cfg.batch_size, cfg.eval_batches, autocast)
             event.update({f"val_{k}": v for k, v in result.items()})
             improved = result["loss"] < best
+            if improved:
+                best_step = step
             best = min(best, result["loss"])
+            event.update(
+                best_val_loss=best,
+                best_val_step=best_step,
+                val_loss_above_best=result["loss"] - best,
+            )
+            if cfg.eval_train_batches:
+                clean = evaluate(
+                    model, train_data, device, cfg.batch_size, cfg.eval_train_batches, autocast
+                )
+                event.update({f"clean_train_{k}": v for k, v in clean.items()})
+                event["generalization_gap"] = result["loss"] - clean["loss"]
             payload = {
                 "model": model.state_dict(),
                 "model_config": cfg.to_dict()["model"],
@@ -275,13 +303,16 @@ def train(
                 "scaler": scaler.state_dict(),
                 "step": step,
                 "best_val_loss": best,
+                "best_val_step": best_step,
                 "sampler_rng": generator.get_state(),
                 "torch_rng": torch.get_rng_state(),
                 "cuda_rng": torch.cuda.get_rng_state_all() if device.type == "cuda" else [],
                 "mps_rng": torch.mps.get_rng_state() if device.type == "mps" else None,
                 "tokenizer_sha256": tokenizer_hash,
+                "tokenizer_json": tokenizer_content,
                 "manifest_sha256": manifest_hash,
                 "preprocessing": manifest["preprocessing"],
+                "phrase_boundaries": manifest.get("phrase_boundaries", False),
                 "initialized_from": initialized_from,
             }
             atomic_save(payload, run / "last.pt")

@@ -4,15 +4,15 @@ from pathlib import Path
 
 import torch
 
+from .checkpoint import checkpoint_tokenizer
 from .midi import (
     PreprocessConfig,
     decode,
     encode,
-    load_tokenizer,
     preprocess_midi,
     strip_tempo_events,
 )
-from .train import choose_device, load_checkpoint, verify_tokenizer
+from .train import choose_device, load_checkpoint
 from .weimar import normalize_chord
 
 
@@ -36,6 +36,7 @@ class MonophonicGrammar:
         self.previous = "BOS"
         self.notes, self.min_notes = 0, min_notes
         self.min_pitch, self.max_pitch = min_pitch, max_pitch
+        self.phrase_starts = []
 
     def consume(self, token):
         raw = self.tokenizer[int(token)]
@@ -53,6 +54,13 @@ class MonophonicGrammar:
             duration = round((beats + frames / resolution) * self.resolution)
             self.end = self.bar * 4 * self.resolution + self.position + duration
             self.notes += 1
+        elif kind == "PhraseStart":
+            self.phrase_starts.append(
+                {
+                    "note_index": self.notes,
+                    "beat": self.bar * 4 + self.position / self.resolution,
+                }
+            )
         self.previous = kind
 
     def allowed(self):
@@ -61,15 +69,17 @@ class MonophonicGrammar:
         if self.previous == "Position":
             if "Chord" in self.types:
                 return self.types["Chord"]
-            return [
+            return self.types.get("PhraseStart", []) + [
                 i
                 for i in self.types["Pitch"]
                 if self.min_pitch <= int(self.values[i]) <= self.max_pitch
             ]
         if self.previous == "Pitch":
             return self.types["Velocity"]
-        if self.previous == "Chord":
-            return [
+        if self.previous in {"Chord", "PhraseStart"}:
+            # Optional once per note, after harmony and before pitch. It cannot
+            # repeat, advance time, or bypass the monophonic note grammar.
+            return (self.types.get("PhraseStart", []) if self.previous == "Chord" else []) + [
                 i
                 for i in self.types["Pitch"]
                 if self.min_pitch <= int(self.values[i]) <= self.max_pitch
@@ -133,9 +143,7 @@ def generate(
     device = choose_device(device)
     model, state = load_checkpoint(checkpoint, device)
     model.eval()
-    tokenizer_path = Path(checkpoint).parent / "tokenizer.json"
-    verify_tokenizer(state, tokenizer_path)
-    tokenizer = load_tokenizer(tokenizer_path)
+    tokenizer = checkpoint_tokenizer(state, checkpoint)
     chord_names = [normalize_chord(value) for value in chords.split(",")] if chords else []
     if chord_names and not any(tokenizer[i].startswith("Chord|") for i in range(len(tokenizer))):
         raise ValueError("Checkpoint tokenizer has no chord-conditioning tokens")
@@ -205,6 +213,10 @@ def generate(
         "device": str(device),
         "tokens": ids,
     }
+    if "PhraseStart" in grammar.types:
+        report["phrase_starts"] = [
+            start for start in grammar.phrase_starts if start["note_index"] < grammar.notes
+        ]
     output.with_suffix(".json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k != "tokens"}, indent=2))
     return result

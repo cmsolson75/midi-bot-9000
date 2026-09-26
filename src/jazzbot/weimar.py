@@ -83,7 +83,7 @@ def _virtual_beat(onsets, value):
     return index + (value - onsets[index]) / max(width, 1e-3)
 
 
-def _score_and_chords(connection, melid, cfg):
+def _score_and_chords(connection, melid, cfg, phrase_boundaries=False):
     beats = connection.execute(
         "SELECT onset, bar, chord FROM beats WHERE melid=? ORDER BY onset", (melid,)
     ).fetchall()
@@ -101,11 +101,13 @@ def _score_and_chords(connection, melid, cfg):
         chords.append(active)
 
     rows = connection.execute(
-        "SELECT onset, pitch, duration, loud_med FROM melody WHERE melid=? ORDER BY onset", (melid,)
+        "SELECT onset, pitch, duration, loud_med FROM melody WHERE melid=? ORDER BY onset, eventid",
+        (melid,),
     ).fetchall()
     track = Track(name="Weimar chord-conditioned solo", program=0)
     grid = 480 // cfg.resolution
-    for onset, pitch, duration, loudness in rows:
+    retained = {}
+    for index, (onset, pitch, duration, loudness) in enumerate(rows):
         pitch = int(round(pitch))
         if not cfg.min_pitch <= pitch <= cfg.max_pitch or duration <= 0:
             continue
@@ -115,16 +117,39 @@ def _score_and_chords(connection, melid, cfg):
             finish = begin + 1
         velocity = max(1, min(127, round(loudness if loudness is not None else 80)))
         track.notes.append(Note(max(0, begin), max(1, finish - begin), pitch, velocity))
+        retained[index] = (max(0, begin), pitch)
     if len(track.notes) < cfg.min_notes:
         raise ValueError(f"only {len(track.notes)} usable notes")
     score = Score(480)
     score.tempos = [Tempo(0, 120)]
     score.time_signatures = [TimeSignature(0, 4, 4)]
     score.tracks = [track]
-    return monophonize(score), chords
+    score = monophonize(score)
+    phrase_positions = set()
+    if phrase_boundaries:
+        sections = connection.execute(
+            "SELECT start, end FROM sections WHERE melid=? AND type='PHRASE' ORDER BY start",
+            (melid,),
+        ).fetchall()
+        if not sections:
+            raise ValueError("missing phrase annotations")
+        surviving = {(note.time, note.pitch) for note in score.tracks[0].notes}
+        for first, last in sections:
+            # Section indices are zero-based, inclusive, relative to the original
+            # melody; they are NOT global event IDs or filtered-note indices.
+            if not 0 <= first <= last < len(rows):
+                raise ValueError("phrase annotation outside melody bounds")
+            for index in range(first, last + 1):
+                identity = retained.get(index)
+                if identity in surviving:
+                    phrase_positions.add(identity[0] // grid)
+                    break
+        if not phrase_positions:
+            raise ValueError("no phrase starts survive preprocessing")
+    return score, chords, phrase_positions
 
 
-def _insert_chords(tokenizer, ids, chords, resolution):
+def _insert_chords(tokenizer, ids, chords, resolution, phrase_positions=None):
     result, bar = [], -1
     for token_id in ids:
         token = tokenizer[token_id]
@@ -135,16 +160,18 @@ def _insert_chords(tokenizer, ids, chords, resolution):
             position = int(token.split("_", 1)[1])
             beat = max(0, bar * 4 + position // resolution)
             result.append(chord_token(tokenizer, chords[min(beat, len(chords) - 1)]))
+            if phrase_positions and bar * 4 * resolution + position in phrase_positions:
+                result.append(tokenizer["PhraseStart_None"])
     return result
 
 
-def prepare_weimar(database, output, seed=42, limit=None, cfg=None):
+def prepare_weimar(database, output, seed=42, limit=None, cfg=None, phrase_boundaries=False):
     database, output = Path(database).resolve(), Path(output)
     cfg = cfg or PreprocessConfig(min_pitch=36, max_pitch=100, min_notes=24)
     if output.exists() and any(output.iterdir()):
         raise ValueError(f"{output} is not empty; use a new output directory")
     output.mkdir(parents=True, exist_ok=True)
-    tokenizer = make_tokenizer(cfg.resolution, use_chords=True)
+    tokenizer = make_tokenizer(cfg.resolution, use_chords=True, use_phrases=phrase_boundaries)
     tokenizer.save(output / "tokenizer.json")
     connection = sqlite3.connect(database)
     connection.row_factory = sqlite3.Row
@@ -167,10 +194,16 @@ def prepare_weimar(database, output, seed=42, limit=None, cfg=None):
             )
             split = "train" if fraction < 0.8 else "val" if fraction < 0.9 else "test"
             try:
-                score, chords = _score_and_chords(connection, solo["melid"], cfg)
-                encoded = _insert_chords(
-                    tokenizer, encode(tokenizer, score), chords, cfg.resolution
+                score, chords, phrase_positions = _score_and_chords(
+                    connection, solo["melid"], cfg, phrase_boundaries
                 )
+                encoded = _insert_chords(
+                    tokenizer, encode(tokenizer, score), chords, cfg.resolution, phrase_positions
+                )
+                if phrase_boundaries and encoded.count(tokenizer["PhraseStart_None"]) != len(
+                    phrase_positions
+                ):
+                    raise ValueError("phrase starts lost during tokenization")
                 ids = [tokenizer["BOS_None"], *encoded, tokenizer["EOS_None"]]
                 records.append(
                     {
@@ -184,6 +217,7 @@ def prepare_weimar(database, output, seed=42, limit=None, cfg=None):
                         "offset": offsets[split],
                         "length": len(ids),
                         "notes": len(score.tracks[0].notes),
+                        **({"phrase_starts": len(phrase_positions)} if phrase_boundaries else {}),
                     }
                 )
                 buffers[split].append(np.asarray(ids, dtype=np.uint16))
@@ -213,6 +247,13 @@ def prepare_weimar(database, output, seed=42, limit=None, cfg=None):
         "skipped": skipped,
         "tokens": offsets,
     }
+    if phrase_boundaries:
+        manifest["phrase_boundaries"] = True
+        manifest["representation"] += "; PhraseStart before annotated phrase-initial pitches"
+        manifest["phrase_annotation_policy"] = (
+            "Zero-based inclusive melody indices; marker moves to first surviving note "
+            "inside the same phrase. Empty phrases omitted; colliding starts merged."
+        )
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(
         json.dumps(

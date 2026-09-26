@@ -1,3 +1,7 @@
+> Historical experiment notes, retained for context. Local results and paths below
+> describe earlier runs; datasets and checkpoints are not included in this repository.
+> See the [README training instructions](../../README.md#training-and-evaluation) for current commands.
+
 # Jazz Bot: dataset and representation test plan
 
 Build a small model that generates an energetic, convincing monophonic jazz solo: coherent phrases, swing, chromatic movement, useful rests, and musical resolutions. High note density alone is not success.
@@ -115,12 +119,11 @@ Also record malformed outputs, overlaps, excessive silence, repeated loops, note
 
 ## 8. Run the existing baseline now
 
-The full PiJAMA corpus is already prepared in this workspace at `data/processed`. On a new training machine, copy it with the project and install that machine's environment using the [README](README.md).
+Prepare PiJAMA at `data/processed` following the [README training instructions](../../README.md#training-and-evaluation) before running this comparison.
 
 ```sh
-uv sync --frozen --extra dev
-uv run --no-sync jazzbot train --data data/processed --config configs/m4max.json --run runs/p0-pijama-remi --max-steps 2000
-uv run --no-sync jazzbot evaluate --data data/processed --checkpoint runs/p0-pijama-remi/best.pt --split val
+uv run jazzbot train --data data/processed --config configs/m4max.json --run runs/p0-pijama-remi --max-steps 2000
+uv run jazzbot evaluate --data data/processed --checkpoint runs/p0-pijama-remi/best.pt --split val
 ```
 
 For NVIDIA, follow the README's CUDA installation instructions and substitute `configs/cuda.json`. Use a fresh run directory. This 2,000-step command is an exploratory PiJAMA budget, not a recommended Weimar budget or a guarantee of convergence.
@@ -128,8 +131,8 @@ For NVIDIA, follow the README's CUDA installation instructions and substitute `c
 Choose an actual held-out MIDI file and replace `path/to/held-out.mid` below:
 
 ```sh
-uv run --no-sync jazzbot generate --checkpoint runs/p0-pijama-remi/best.pt --prompt path/to/held-out.mid --prompt-seconds 8 --output outputs/p0-prompt01-seed11.mid --max-new-tokens 512 --min-notes 32 --temperature 0.9 --top-k 32 --top-p 0.95 --seed 11
-uv run --no-sync jazzbot inspect outputs/p0-prompt01-seed11.mid
+uv run jazzbot generate --checkpoint runs/p0-pijama-remi/best.pt --prompt path/to/held-out.mid --prompt-seconds 8 --output outputs/p0-prompt01-seed11.mid --max-new-tokens 512 --min-notes 32 --temperature 0.9 --top-k 32 --top-p 0.95 --seed 11
+uv run jazzbot inspect outputs/p0-prompt01-seed11.mid
 ```
 
 Repeat with seeds 22 and 33 and unique output filenames. Current output includes the preprocessed prompt; judge the newly generated portion separately. The token cap remains a hard limit and can end a sample before the requested minimum notes.

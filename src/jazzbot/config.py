@@ -1,4 +1,5 @@
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -52,6 +53,11 @@ class TrainConfig:
     eval_batches: int = 32
     log_interval: int = 10
     transpose: int = 5
+    augmentation_probability: float = 0.0
+    velocity_shift_bins: int = 0
+    duration_scale_min: float = 1.0
+    duration_scale_max: float = 1.0
+    eval_train_batches: int = 0
     seed: int = 42
     device: str = "auto"
     precision: str = "auto"
@@ -75,6 +81,18 @@ class TrainConfig:
             raise ValueError("warmup_steps and transpose must be nonnegative")
         if result.learning_rate <= 0 or not 0 <= result.min_lr_ratio <= 1:
             raise ValueError("Invalid learning rate")
+        if not 0 <= result.augmentation_probability <= 1:
+            raise ValueError("augmentation_probability must be between 0 and 1")
+        if not isinstance(result.velocity_shift_bins, int) or result.velocity_shift_bins < 0:
+            raise ValueError("velocity_shift_bins must be a nonnegative integer")
+        if not (
+            math.isfinite(result.duration_scale_min)
+            and math.isfinite(result.duration_scale_max)
+            and 0 < result.duration_scale_min <= result.duration_scale_max
+        ):
+            raise ValueError("duration scales must be finite, positive and ordered")
+        if not isinstance(result.eval_train_batches, int) or result.eval_train_batches < 0:
+            raise ValueError("eval_train_batches must be a nonnegative integer")
         return result
 
     def to_dict(self):

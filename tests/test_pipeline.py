@@ -1,5 +1,6 @@
 import csv
 import json
+import shutil
 import zipfile
 
 import numpy as np
@@ -7,6 +8,7 @@ import pytest
 import torch
 from test_midi import write_midi
 
+from jazzbot.augment import NoteAugmenter
 from jazzbot.data import TokenCorpus
 from jazzbot.download import safe_extract
 from jazzbot.generate import generate
@@ -39,7 +41,9 @@ def make_dataset(root):
 def test_train_resume_generate_and_window_boundaries(tmp_path):
     root, data = tmp_path / "raw", tmp_path / "data"
     make_dataset(root)
-    prepare(root, data, split_mode="official", cfg=PreprocessConfig(min_notes=4))
+    prepare(
+        root, data, split_mode="official", cfg=PreprocessConfig(min_notes=4), chord_compatible=True
+    )
     tokenizer = load_tokenizer(data / "tokenizer.json")
     corpus = TokenCorpus(data, "train", 32, tokenizer["PAD_None"])
     all_targets = torch.cat([y[y >= 0] for _, y in corpus.eval_batches(2)])
@@ -63,6 +67,13 @@ def test_train_resume_generate_and_window_boundaries(tmp_path):
         "eval_batches": 1,
         "log_interval": 1,
         "device": "cpu",
+        "min_lr_ratio": 1.0,
+        "augmentation_probability": 0.9,
+        "velocity_shift_bins": 6,
+        "duration_scale_min": 0.65,
+        "duration_scale_max": 1.35,
+        "transpose": 12,
+        "eval_train_batches": 1,
     }
     config = tmp_path / "config.json"
     config.write_text(json.dumps(cfg))
@@ -71,8 +82,35 @@ def test_train_resume_generate_and_window_boundaries(tmp_path):
     train(data, run, config, resume=run / "last.pt")
     checkpoint = torch.load(run / "last.pt", weights_only=True)
     assert checkpoint["step"] == 4
+    assert checkpoint["tokenizer_json"] == (data / "tokenizer.json").read_bytes()
     assert "optimizer" in checkpoint and "sampler_rng" in checkpoint
-    score = generate(run / "last.pt", tmp_path / "solo.mid", max_new_tokens=80, device="cpu")
+    # Constant LR makes an interrupted/resumed run directly comparable to an
+    # uninterrupted one, including augmentation and dropout RNG states.
+    uninterrupted_run = tmp_path / "uninterrupted"
+    train(data, uninterrupted_run, config)
+    uninterrupted = torch.load(uninterrupted_run / "last.pt", weights_only=True)
+    for key, value in checkpoint["model"].items():
+        torch.testing.assert_close(value, uninterrupted["model"][key], rtol=0, atol=0)
+    events = [json.loads(line) for line in (run / "metrics.jsonl").read_text().splitlines()]
+    assert all("clean_train_loss" in event and "best_val_step" in event for event in events)
+    augmenter = NoteAugmenter(tokenizer, 1, 6, (0.65, 1.35))
+    x, y = corpus.random_batch(4, torch.Generator().manual_seed(5), augmenter=augmenter)
+    assert torch.equal(x[:, 1:], y[:, :-1])
+    # Include padding and confirm it never becomes a prediction target.
+    padded = TokenCorpus(data, "train", 4096, tokenizer["PAD_None"])
+    x, y = padded.random_batch(1, torch.Generator().manual_seed(5), augmenter=augmenter)
+    size = int((y[0] >= 0).sum())
+    assert torch.equal(x[0, 1:size], y[0, : size - 1])
+    assert (x[0, size:] == tokenizer["PAD_None"]).all()
+    assert (y[0, size:] == -100).all()
+    validation = TokenCorpus(data, "val", 32, tokenizer["PAD_None"])
+    with pytest.raises(ValueError, match="training split"):
+        validation.random_batch(1, torch.Generator(), augmenter=augmenter)
+    assert np.array_equal(np.fromfile(data / "train.bin", dtype=np.uint16), original)
+    standalone = tmp_path / "standalone.pt"
+    shutil.copyfile(run / "last.pt", standalone)
+    assert not (standalone.parent / "tokenizer.json").exists()
+    score = generate(standalone, tmp_path / "solo.mid", max_new_tokens=80, device="cpu")
     assert len(score.tracks[0].notes) > 0
     score = generate(
         run / "last.pt",

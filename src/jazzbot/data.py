@@ -10,6 +10,7 @@ import torch
 class TokenCorpus:
     def __init__(self, root, split, context_length, pad_id):
         self.root = Path(root)
+        self.split = split
         self.manifest = json.loads((self.root / "manifest.json").read_text(encoding="utf-8"))
         self.records = [r for r in self.manifest["records"] if r["split"] == split]
         if not self.records:
@@ -37,8 +38,16 @@ class TokenCorpus:
         return x, y
 
     def random_batch(
-        self, batch_size, generator, pitch_lookup=None, transpose=0, chord_remaps=None
+        self,
+        batch_size,
+        generator,
+        pitch_lookup=None,
+        transpose=0,
+        chord_remaps=None,
+        augmenter=None,
     ):
+        if augmenter is not None and self.split != "train":
+            raise ValueError("Augmentation is only allowed on the training split")
         choices = torch.multinomial(self.weights, batch_size, replacement=True, generator=generator)
         samples = []
         for index in choices.tolist():
@@ -66,6 +75,12 @@ class TokenCorpus:
                         chord_remap = chord_remaps[shift]
                         x = chord_remap[x]
                         y[valid] = chord_remap[y[valid]]
+            if augmenter is not None:
+                # Transform the shared sequence once so next-token targets agree
+                # with inputs, including at the crop edges and before padding.
+                size = int((y >= 0).sum())
+                ids = augmenter(torch.cat((x[:size], y[size - 1 : size])), generator)
+                x[:size], y[:size] = ids[:-1], ids[1:]
             samples.append((x, y))
         return torch.stack([s[0] for s in samples]), torch.stack([s[1] for s in samples])
 

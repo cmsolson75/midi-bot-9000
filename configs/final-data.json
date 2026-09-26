@@ -1,0 +1,43 @@
+{
+  "parker_revision": "3147146e816810ac474aae8bac1f4e7141c8e27b",
+  "pijama_metadata_sha256": "bbd3f5ae19c146c9f3e255781e400077b1a56f6459cf4245b1b349ee405fa55d",
+  "weimar_database_sha256": "af6a0d9debf042c3581565bd75baad591d32e166cd2ec7298519883de614bf12",
+  "corpora": {
+    "pijama-chord-compatible": {
+      "files": {
+        "train.bin": "63d1ed13d2c2004ad381c7c2f49cf50dc659eaacb02a3ef32f7964c6e82f6bdf",
+        "val.bin": "0cb35008d8db74c4c67852ef700d20a9ab27d37c651eb12b941f0e5c8b411eb1",
+        "test.bin": "e9e2ccfc279a66cc2b77e7eb9cb6a8ca8c531e019e690a041fb546c455c95066",
+        "tokenizer.json": "bae502619f5440ce9b519f26d4bc326d6502584736d573bc6ec54a8225ac2834"
+      },
+      "manifest_sha256": "6f4c84a4d47202467ef4dfe71f4b8d6766136ec497e513eb5e7ede2674543e79"
+    },
+    "parker-chord-compatible": {
+      "files": {
+        "train.bin": "00d6372ca9d06a10f4d6cf33220eef0bab60da86726c9571375594276dbbbc2e",
+        "val.bin": "951fa88130923542b9b6f6765cfde88118b4d4bcb5f2f40d53c9e581c22d687e",
+        "test.bin": "d118728f0bc502e1f42fb0e72e4012796f399d0bdf77474680a3ae22c486c207",
+        "tokenizer.json": "bae502619f5440ce9b519f26d4bc326d6502584736d573bc6ec54a8225ac2834"
+      },
+      "manifest_sha256": "58f705eb544a00f22ed600305f99ac72626e6f20f616d974fac7caf0fe7244e3"
+    },
+    "pretrain-mixture": {
+      "files": {
+        "train.bin": "f5673393d5cef9e60b94d41552c405e0a55c53e049a93d18e74998480dc65773",
+        "val.bin": "f8fbc43e87153ed7b6317abaa8e358423ad90be1deb79aed5b3a97fcae7514ac",
+        "test.bin": "bdf407078f474142070cb5ea483b2011f097423762ec7c81bffc8d9245ac1f31",
+        "tokenizer.json": "bae502619f5440ce9b519f26d4bc326d6502584736d573bc6ec54a8225ac2834"
+      },
+      "manifest_sha256": "45a857aebd5da2e51b587c3f6074e37b62973fcd25d161d05bcad3776ece0598"
+    },
+    "weimar-phrases": {
+      "files": {
+        "train.bin": "9cc511dd4bd588b49d65b42294131dd89c9c5fb48969b2db823de7c527df3b16",
+        "val.bin": "ee482d8ddfac3de8526ff861336e05fe173a989bddd2020a1a5262fc8f22c796",
+        "test.bin": "59ac48a7ce81fef8b457eb5d91cba3e654fcec3b678c71639980e6efe8e4cb1a",
+        "tokenizer.json": "52f69f27451fa29fa177fa14a741782319562753c4640438f75d66a3915fcdce"
+      },
+      "manifest_sha256": "be5a8de91d7e80aff20412588480eaf705bb301fad53951883d1e7e43eb1a3e1"
+    }
+  }
+}

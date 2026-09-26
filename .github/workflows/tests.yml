@@ -1,5 +1,7 @@
 name: tests
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   test:
     strategy:
@@ -9,6 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync --extra dev --frozen
-      - run: uv run ruff check src tests
-      - run: uv run pytest -q
+      - run: uv run --locked --extra dev ruff check src tests scripts
+      - run: uv run --locked --extra dev pytest -q
+      - run: uv run --locked jazzbot --help
+      - run: uv run --locked jazzbot info

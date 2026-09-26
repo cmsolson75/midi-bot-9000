@@ -21,11 +21,21 @@ htmlcov/
 data/
 runs/
 outputs/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.mid
+*.midi
+*.wav
+*.mp3
 
 # Packaging output
 build/
 dist/
 release/
+*.whl
 
 # Editor and OS files
 .idea/

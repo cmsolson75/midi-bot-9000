@@ -1,0 +1,31 @@
+{
+  "model": {
+    "dim": 256,
+    "layers": 10,
+    "heads": 8,
+    "kv_heads": 4,
+    "hidden_dim": 704,
+    "context_length": 1024,
+    "dropout": 0.1
+  },
+  "batch_size": 4,
+  "accumulation_steps": 8,
+  "max_steps": 2000,
+  "learning_rate": 0.0003,
+  "min_lr_ratio": 0.1,
+  "warmup_steps": 100,
+  "weight_decay": 0.1,
+  "grad_clip": 1.0,
+  "eval_interval": 100,
+  "eval_batches": 16,
+  "eval_train_batches": 16,
+  "log_interval": 25,
+  "transpose": 12,
+  "augmentation_probability": 0.9,
+  "velocity_shift_bins": 6,
+  "duration_scale_min": 0.65,
+  "duration_scale_max": 1.35,
+  "seed": 42,
+  "device": "mps",
+  "precision": "fp32"
+}
